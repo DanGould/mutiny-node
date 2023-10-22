@@ -446,6 +446,7 @@ impl MutinyWallet {
             invoice: None,
             btc_amount: None,
             labels,
+            pj: None,
         })
     }
 

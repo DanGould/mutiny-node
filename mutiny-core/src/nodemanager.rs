@@ -98,6 +98,7 @@ pub struct MutinyBip21RawMaterials {
     pub invoice: Option<Bolt11Invoice>,
     pub btc_amount: Option<String>,
     pub labels: Vec<String>,
+    pub pj: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
@@ -663,6 +664,7 @@ impl<S: MutinyStorage> NodeManager<S> {
         Err(MutinyError::WalletOperationFailed)
     }
 
+    // Send v1 payjoin request
     pub async fn send_payjoin(
         &self,
         uri: Uri<'_, payjoin::bitcoin::address::NetworkChecked>,
@@ -733,6 +735,58 @@ impl<S: MutinyStorage> NodeManager<S> {
         self.broadcast_transaction(tx).await?;
         log_debug!(self.logger, "Payjoin broadcast! TXID: {txid}");
         Ok(txid)
+    }
+
+    /// Poll the payjoin relay to maintain a payjoin session and create a payjoin proposal.
+    pub async fn receive_payjoin(
+        wallet: Arc<OnChainWallet<S>>,
+        mut enrolled: payjoin::receive::v2::Enrolled,
+    ) -> Result<Txid, MutinyError> {
+        let http_client = reqwest::Client::builder()
+            //.danger_accept_invalid_certs(true) ? is tls unchecked :O
+            .build()
+            .unwrap();
+        let proposal: payjoin::receive::v2::UncheckedProposal =
+            Self::poll_for_fallback_psbt(&http_client, &mut enrolled)
+                .await
+                .unwrap();
+        let payjoin_proposal = wallet.process_payjoin_proposal(proposal).unwrap();
+
+        let (req, ohttp_ctx) = payjoin_proposal.extract_v2_req().unwrap();
+        let res = http_client
+            .post(req.url)
+            .body(req.body)
+            .send()
+            .await
+            .unwrap();
+        let res = res.bytes().await.unwrap();
+        // enroll must succeed
+        let _res = payjoin_proposal
+            .deserialize_res(res.to_vec(), ohttp_ctx)
+            .unwrap();
+        // convert from bitcoin 29 to 30
+        let txid = payjoin_proposal.psbt().clone().extract_tx().txid();
+        let txid = Txid::from_str(&txid.to_string()).unwrap();
+        Ok(txid)
+    }
+
+    async fn poll_for_fallback_psbt(
+        client: &reqwest::Client,
+        enroller: &mut payjoin::receive::v2::Enrolled,
+    ) -> Result<payjoin::receive::v2::UncheckedProposal, ()> {
+        loop {
+            let (req, context) = enroller.extract_req().unwrap();
+            let ohttp_response = client.post(req.url).body(req.body).send().await.unwrap();
+            let ohttp_response = ohttp_response.bytes().await.unwrap();
+            let proposal = enroller
+                .process_res(ohttp_response.as_ref(), context)
+                .map_err(|e| anyhow!("parse error {}", e))
+                .unwrap();
+            match proposal {
+                Some(proposal) => return Ok(proposal),
+                None => utils::sleep(5000).await,
+            }
+        }
     }
 
     /// Sends an on-chain transaction to the given address.

@@ -1182,11 +1182,66 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             return Err(MutinyError::WalletOperationFailed);
         };
 
+        let pj = {
+            use anyhow::anyhow;
+            // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
+            // That would reveal IP address
+            const OHTTP_RELAYS: [&str; 2] = [
+                "https://ohttp-relay.obscuravpn.io/payjoin",
+                "https://bobspace-ohttp.duckdns.org",
+            ];
+            const PAYJOIN_DIR: &str = "https://payjo.in";
+
+            let http_client = reqwest::Client::builder().build().unwrap();
+
+            let ohttp_keys = http_client
+                .get(format!("{}/ohttp-keys", PAYJOIN_DIR))
+                .send()
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap();
+            let ohttp_keys_base64 = base64::encode(ohttp_keys.as_ref());
+
+            let mut enroller = payjoin::receive::v2::Enroller::from_relay_config(
+                PAYJOIN_DIR,
+                &ohttp_keys_base64,
+                OHTTP_RELAYS[0], // TODO pick ohttp relay at random
+            );
+
+            // enroll client
+            let (req, context) = enroller.extract_req().unwrap();
+            let ohttp_response = http_client
+                .post(req.url)
+                .body(req.body)
+                .send()
+                .await
+                .unwrap();
+            let ohttp_response = ohttp_response.bytes().await.unwrap();
+            let enrolled = enroller
+                .process_res(ohttp_response.as_ref(), context)
+                .map_err(|e| anyhow!("parse error {}", e))
+                .unwrap();
+            let pj_uri = enrolled.fallback_target();
+            log_debug!(self.logger, "{pj_uri}");
+            let wallet = self.node_manager.wallet.clone();
+            // run await payjoin task in the background as it'll keep polling the relay
+            utils::spawn(async move {
+                let pj_txid = NodeManager::receive_payjoin(wallet, enrolled)
+                    .await
+                    .unwrap();
+                log::info!("Received payjoin txid: {}", pj_txid);
+            });
+            Some(pj_uri)
+        };
+
         Ok(MutinyBip21RawMaterials {
             address,
             invoice,
             btc_amount: amount.map(|amount| bitcoin::Amount::from_sat(amount).to_btc().to_string()),
             labels,
+            pj,
         })
     }
 
