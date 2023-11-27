@@ -1226,9 +1226,10 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             let pj_uri = enrolled.fallback_target();
             log_debug!(self.logger, "{pj_uri}");
             let wallet = self.node_manager.wallet.clone();
+            let stop = self.node_manager.stop.clone();
             // run await payjoin task in the background as it'll keep polling the relay
             utils::spawn(async move {
-                let pj_txid = NodeManager::receive_payjoin(wallet, enrolled)
+                let pj_txid = NodeManager::receive_payjoin(wallet, stop, enrolled)
                     .await
                     .unwrap();
                 log::info!("Received payjoin txid: {}", pj_txid);
