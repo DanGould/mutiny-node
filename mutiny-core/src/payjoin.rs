@@ -31,6 +31,7 @@ pub enum Error {
     Reqwest(reqwest::Error),
     ReceiverStateMachine(String),
     Txid(bitcoin::hashes::hex::Error),
+    Shutdown,
 }
 
 impl std::error::Error for Error {}
@@ -41,6 +42,7 @@ impl std::fmt::Display for Error {
             Error::Reqwest(e) => write!(f, "Reqwest error: {}", e),
             Error::ReceiverStateMachine(e) => write!(f, "Payjoin state machine error: {}", e),
             Error::Txid(e) => write!(f, "Payjoin txid error: {}", e),
+            Error::Shutdown => write!(f, "Payjoin stopped by application shutdown"),
         }
     }
 }
