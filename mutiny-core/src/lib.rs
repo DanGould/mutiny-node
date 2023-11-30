@@ -1227,7 +1227,8 @@ impl<S: MutinyStorage> MutinyWallet<S> {
                 .process_res(ohttp_response.as_ref(), context)
                 .map_err(|e| anyhow!("parse error {}", e))
                 .unwrap();
-            self.node_manager
+            let session = self
+                .node_manager
                 .storage
                 .persist_payjoin(enrolled.clone())
                 .unwrap();
@@ -1235,9 +1236,10 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             log_debug!(self.logger, "{pj_uri}");
             let wallet = self.node_manager.wallet.clone();
             let stop = self.node_manager.stop.clone();
+            let storage = Arc::new(self.node_manager.storage.clone());
             // run await payjoin task in the background as it'll keep polling the relay
             utils::spawn(async move {
-                let pj_txid = NodeManager::receive_payjoin(wallet, stop, enrolled)
+                let pj_txid = NodeManager::receive_payjoin(wallet, stop, storage, session)
                     .await
                     .unwrap();
                 log::info!("Received payjoin txid: {}", pj_txid);

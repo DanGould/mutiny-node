@@ -583,8 +583,11 @@ impl<S: MutinyStorage> NodeManager<S> {
         for payjoin in all {
             let wallet = nm.wallet.clone();
             let stop = nm.stop.clone();
+            let storage = Arc::new(nm.storage.clone());
             utils::spawn(async move {
-                let pj_txid = Self::receive_payjoin(wallet, stop, payjoin).await.unwrap();
+                let pj_txid = Self::receive_payjoin(wallet, stop, storage, payjoin)
+                    .await
+                    .unwrap();
                 log::info!("Received payjoin txid: {}", pj_txid);
             });
         }
@@ -755,14 +758,15 @@ impl<S: MutinyStorage> NodeManager<S> {
     pub async fn receive_payjoin(
         wallet: Arc<OnChainWallet<S>>,
         stop: Arc<AtomicBool>,
-        mut enrolled: payjoin::receive::v2::Enrolled,
+        storage: Arc<S>,
+        mut session: crate::payjoin::Session,
     ) -> Result<Txid, MutinyError> {
         let http_client = reqwest::Client::builder()
             //.danger_accept_invalid_certs(true) ? is tls unchecked :O
             .build()
             .unwrap();
         let proposal: payjoin::receive::v2::UncheckedProposal =
-            Self::poll_for_fallback_psbt(stop, &http_client, &mut enrolled)
+            Self::poll_for_fallback_psbt(stop, storage, &http_client, &mut session)
                 .await
                 .unwrap();
         let payjoin_proposal = wallet.process_payjoin_proposal(proposal).unwrap();
@@ -787,17 +791,23 @@ impl<S: MutinyStorage> NodeManager<S> {
 
     async fn poll_for_fallback_psbt(
         stop: Arc<AtomicBool>,
+        storage: Arc<S>,
         client: &reqwest::Client,
-        enroller: &mut payjoin::receive::v2::Enrolled,
+        session: &mut crate::payjoin::Session,
     ) -> Result<payjoin::receive::v2::UncheckedProposal, ()> {
         loop {
             if stop.load(Ordering::Relaxed) {
                 return Err(()); // stopped
             }
-            let (req, context) = enroller.extract_req().unwrap();
+            if session.expiry < utils::now() {
+                let _ = storage.delete_payjoin(&session.enrolled.pubkey());
+                return Err(()); // expired
+            }
+            let (req, context) = session.enrolled.extract_req().unwrap();
             let ohttp_response = client.post(req.url).body(req.body).send().await.unwrap();
             let ohttp_response = ohttp_response.bytes().await.unwrap();
-            let proposal = enroller
+            let proposal = session
+                .enrolled
                 .process_res(ohttp_response.as_ref(), context)
                 .map_err(|e| anyhow!("parse error {}", e))
                 .unwrap();
