@@ -8,6 +8,7 @@
     type_alias_bounds
 )]
 extern crate core;
+extern crate payjoin as pj;
 
 pub mod auth;
 mod chain;
@@ -30,6 +31,7 @@ mod node;
 pub mod nodemanager;
 pub mod nostr;
 mod onchain;
+mod payjoin;
 mod peermanager;
 pub mod scorer;
 pub mod storage;
@@ -43,6 +45,7 @@ mod test_utils;
 pub use crate::gossip::{GOSSIP_SYNC_TIME_KEY, NETWORK_GRAPH_KEY, PROB_SCORER_KEY};
 pub use crate::keymanager::generate_seed;
 pub use crate::ldkstorage::{CHANNEL_MANAGER_KEY, MONITORS_PREFIX_KEY};
+use crate::payjoin::PayjoinStorage;
 use crate::{auth::MutinyAuthClient, logging::MutinyLogger};
 use crate::{error::MutinyError, nostr::ReservedProfile};
 use crate::{
@@ -863,6 +866,7 @@ impl<S: MutinyStorage> MutinyWallet<S> {
         // when we restart, gen a new session id
         self.node_manager = Arc::new(nm_builder.build().await?);
         NodeManager::start_sync(self.node_manager.clone());
+        NodeManager::resume_payjoins(self.node_manager.clone());
 
         Ok(())
     }
@@ -1204,7 +1208,7 @@ impl<S: MutinyStorage> MutinyWallet<S> {
                 .unwrap();
             let ohttp_keys_base64 = base64::encode(ohttp_keys.as_ref());
 
-            let mut enroller = payjoin::receive::v2::Enroller::from_relay_config(
+            let mut enroller = pj::receive::v2::Enroller::from_relay_config(
                 PAYJOIN_DIR,
                 &ohttp_keys_base64,
                 OHTTP_RELAYS[0], // TODO pick ohttp relay at random
@@ -1222,6 +1226,10 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             let enrolled = enroller
                 .process_res(ohttp_response.as_ref(), context)
                 .map_err(|e| anyhow!("parse error {}", e))
+                .unwrap();
+            self.node_manager
+                .storage
+                .persist_payjoin(enrolled.clone())
                 .unwrap();
             let pj_uri = enrolled.fallback_target();
             log_debug!(self.logger, "{pj_uri}");
