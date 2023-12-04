@@ -1190,16 +1190,11 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             use anyhow::anyhow;
             // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
             // That would reveal IP address
-            const OHTTP_RELAYS: [&str; 2] = [
-                "https://ohttp-relay.obscuravpn.io/payjoin",
-                "https://bobspace-ohttp.duckdns.org",
-            ];
-            const PAYJOIN_DIR: &str = "https://payjo.in";
 
             let http_client = reqwest::Client::builder().build().unwrap();
 
             let ohttp_keys = http_client
-                .get(format!("{}/ohttp-keys", PAYJOIN_DIR))
+                .get(format!("{}/ohttp-keys", crate::payjoin::PAYJOIN_DIR))
                 .send()
                 .await
                 .unwrap()
@@ -1209,9 +1204,9 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             let ohttp_keys_base64 = base64::encode(ohttp_keys.as_ref());
 
             let mut enroller = pj::receive::v2::Enroller::from_relay_config(
-                PAYJOIN_DIR,
+                crate::payjoin::PAYJOIN_DIR,
                 &ohttp_keys_base64,
-                OHTTP_RELAYS[0], // TODO pick ohttp relay at random
+                crate::payjoin::OHTTP_RELAYS[0], // TODO pick ohttp relay at random
             );
 
             // enroll client

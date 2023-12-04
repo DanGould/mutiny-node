@@ -6,6 +6,12 @@ use payjoin::receive::v2::Enrolled;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub(crate) const OHTTP_RELAYS: [&str; 2] = [
+    "https://ohttp-relay.obscuravpn.io/payjoin",
+    "https://bobspace-ohttp.duckdns.org",
+];
+pub(crate) const PAYJOIN_DIR: &str = "https://payjo.in";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub enrolled: Enrolled,
