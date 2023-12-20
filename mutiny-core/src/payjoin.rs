@@ -61,3 +61,44 @@ impl<S: MutinyStorage> PayjoinStorage for S {
         self.delete(&[get_payjoin_key(id)])
     }
 }
+
+#[derive(Debug)]
+pub enum Error {
+    Reqwest(reqwest::Error),
+    ReceiverStateMachine(payjoin::receive::Error),
+    V2Encapsulation(payjoin::v2::Error),
+    Wallet(payjoin::Error),
+    Txid(bitcoin::hashes::hex::Error),
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            Error::Reqwest(e) => write!(f, "Reqwest error: {}", e),
+            Error::ReceiverStateMachine(e) => write!(f, "Payjoin error: {}", e),
+            Error::V2Encapsulation(e) => write!(f, "Payjoin v2 error: {}", e),
+            Error::Wallet(e) => write!(f, "Payjoin wallet error: {}", e),
+            Error::Txid(e) => write!(f, "Payjoin txid error: {}", e),
+        }
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Self {
+        Error::Reqwest(e)
+    }
+}
+
+impl From<payjoin::receive::Error> for Error {
+    fn from(e: payjoin::receive::Error) -> Self {
+        Error::ReceiverStateMachine(e)
+    }
+}
+
+impl From<payjoin::v2::Error> for Error {
+    fn from(e: payjoin::v2::Error) -> Self {
+        Error::V2Encapsulation(e)
+    }
+}

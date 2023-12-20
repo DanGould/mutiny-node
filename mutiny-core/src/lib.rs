@@ -1186,60 +1186,21 @@ impl<S: MutinyStorage> MutinyWallet<S> {
             return Err(MutinyError::WalletOperationFailed);
         };
 
-        let pj = {
-            use anyhow::anyhow;
-            // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
-            // That would reveal IP address
-
-            let http_client = reqwest::Client::builder().build().unwrap();
-
-            let ohttp_keys = http_client
-                .get(format!("{}/ohttp-keys", crate::payjoin::PAYJOIN_DIR))
-                .send()
-                .await
-                .unwrap()
-                .bytes()
-                .await
-                .unwrap();
-            let ohttp_keys_base64 = base64::encode(ohttp_keys.as_ref());
-
-            let mut enroller = pj::receive::v2::Enroller::from_relay_config(
-                crate::payjoin::PAYJOIN_DIR,
-                &ohttp_keys_base64,
-                crate::payjoin::OHTTP_RELAYS[0], // TODO pick ohttp relay at random
-            );
-
-            // enroll client
-            let (req, context) = enroller.extract_req().unwrap();
-            let ohttp_response = http_client
-                .post(req.url)
-                .body(req.body)
-                .send()
-                .await
-                .unwrap();
-            let ohttp_response = ohttp_response.bytes().await.unwrap();
-            let enrolled = enroller
-                .process_res(ohttp_response.as_ref(), context)
-                .map_err(|e| anyhow!("parse error {}", e))
-                .unwrap();
-            let session = self
-                .node_manager
-                .storage
-                .persist_payjoin(enrolled.clone())
-                .unwrap();
-            let pj_uri = enrolled.fallback_target();
-            log_debug!(self.logger, "{pj_uri}");
-            let wallet = self.node_manager.wallet.clone();
-            let stop = self.node_manager.stop.clone();
-            let storage = Arc::new(self.node_manager.storage.clone());
-            // run await payjoin task in the background as it'll keep polling the relay
-            utils::spawn(async move {
-                let pj_txid = NodeManager::receive_payjoin(wallet, stop, storage, session)
-                    .await
-                    .unwrap();
-                log::info!("Received payjoin txid: {}", pj_txid);
-            });
-            Some(pj_uri)
+        let pj = match self.node_manager.start_payjoin_session().await {
+            Ok(enrolled) => {
+                let session = self
+                    .node_manager
+                    .storage
+                    .persist_payjoin(enrolled.clone())?;
+                let pj_uri = session.enrolled.fallback_target();
+                log_debug!(self.logger, "{pj_uri}");
+                self.node_manager.spawn_payjoin_receiver(session);
+                Some(pj_uri)
+            }
+            Err(e) => {
+                log_error!(self.logger, "Error enrolling payjoin: {e}");
+                None
+            }
         };
 
         Ok(MutinyBip21RawMaterials {
