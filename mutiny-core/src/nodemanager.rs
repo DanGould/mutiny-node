@@ -767,7 +767,16 @@ impl<S: MutinyStorage> NodeManager<S> {
             .map_err(|_| MutinyError::IncorrectNetwork)?;
         let address = uri.address.clone();
         let original_psbt = self.wallet.create_signed_psbt(address, amount, fee_rate)?;
-        // TODO ensure this creates a pending tx in the UI.  Ensure locked UTXO.
+        // Track this transaction in the wallet so it shows as an ActivityItem in UI.
+        // We'll cancel it if and when this original_psbt fallback is replaced with a received payjoin.
+        self.wallet
+            .insert_tx(
+                original_psbt.clone().extract_tx(),
+                ConfirmationTime::unconfirmed(crate::utils::now().as_secs()),
+                None,
+            )
+            .await?;
+
         let fee_rate = if let Some(rate) = fee_rate {
             FeeRate::from_sat_per_vb(rate)
         } else {
@@ -798,6 +807,7 @@ impl<S: MutinyStorage> NodeManager<S> {
             let proposal_psbt = match Self::poll_payjoin_sender(stop, req_ctx).await {
                 Ok(psbt) => psbt,
                 Err(e) => {
+                    // self.wallet cancel_tx
                     log_error!(logger, "Error polling payjoin sender: {e}");
                     return;
                 }
@@ -867,11 +877,13 @@ impl<S: MutinyStorage> NodeManager<S> {
         labels: Vec<String>,
     ) -> Result<Txid, MutinyError> {
         log_debug!(logger, "Sending payjoin..");
+        let original_tx = original_psbt.clone().extract_tx();
         let tx = wallet
             .send_payjoin(original_psbt, proposal_psbt, labels)
             .await?;
         let txid = tx.txid();
         wallet.broadcast_transaction(tx).await?;
+        wallet.cancel_tx(&original_tx)?;
         log_info!(logger, "Payjoin broadcast! TXID: {txid}");
         Ok(txid)
     }

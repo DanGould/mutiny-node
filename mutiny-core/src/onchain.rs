@@ -355,6 +355,12 @@ impl<S: MutinyStorage> OnChainWallet<S> {
         Ok(())
     }
 
+    pub(crate) fn cancel_tx(&self, tx: &Transaction) -> Result<(), MutinyError> {
+        let mut wallet = self.wallet.try_write()?;
+        wallet.cancel_tx(tx);
+        Ok(())
+    }
+
     fn is_mine(&self, script: &Script) -> Result<bool, MutinyError> {
         Ok(self.wallet.try_read()?.is_mine(script))
     }
@@ -399,15 +405,12 @@ impl<S: MutinyStorage> OnChainWallet<S> {
 
         // Outputs may be substituted for e.g. batching at this stage
         // We're not doing this yet.
-
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt| {
                 let mut psbt = psbt.clone();
-                let wallet = self
-                    .wallet
-                    .try_read()
-                    .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?;
-                wallet
+                self.wallet
+                    .try_write()
+                    .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?
                     .sign(&mut psbt, SignOptions::default())
                     .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?;
                 Ok(psbt)
@@ -415,10 +418,18 @@ impl<S: MutinyStorage> OnChainWallet<S> {
             // TODO: check Mutiny's minfeerate is present here
             Some(payjoin::bitcoin::FeeRate::MIN),
         )?;
-        let payjoin_proposal_psbt = payjoin_proposal.psbt();
+        let payjoin_psbt_tx = payjoin_proposal.psbt().clone().extract_tx();
+        self.wallet
+            .try_write()
+            .map_err(|_| Error::Server(MutinyError::WalletOperationFailed.into()))?
+            .insert_tx(
+                payjoin_psbt_tx,
+                ConfirmationTime::unconfirmed(crate::utils::now().as_secs()),
+            )
+            .map_err(|_| Error::Server(MutinyError::WalletOperationFailed.into()))?;
         log::debug!(
             "Receiver's Payjoin proposal PSBT Rsponse: {:#?}",
-            payjoin_proposal_psbt
+            payjoin_proposal.psbt()
         );
         Ok(payjoin_proposal)
     }
