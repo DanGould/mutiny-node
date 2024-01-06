@@ -281,6 +281,12 @@ impl<S: MutinyStorage> OnChainWallet<S> {
         Ok(())
     }
 
+    pub(crate) fn cancel_tx(&self, tx: &Transaction) -> Result<(), MutinyError> {
+        let mut wallet = self.wallet.try_write()?;
+        wallet.cancel_tx(tx);
+        Ok(())
+    }
+
     fn is_mine(&self, script: &Script) -> Result<bool, MutinyError> {
         Ok(self.wallet.try_read()?.is_mine(script))
     }
