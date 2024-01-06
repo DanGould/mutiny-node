@@ -185,6 +185,8 @@ pub enum ActivityItem {
     OnChain(TransactionDetails),
     Lightning(Box<MutinyInvoice>),
     ChannelClosed(ChannelClosure),
+    // /// A payjoin proposal is posted to the directory but not yet broadcast from the sender
+    // PendingPayjoin,
 }
 
 impl ActivityItem {

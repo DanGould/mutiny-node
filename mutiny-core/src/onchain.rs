@@ -336,15 +336,15 @@ impl<S: MutinyStorage> OnChainWallet<S> {
 
         // Outputs may be substituted for e.g. batching at this stage
         // We're not doing this yet.
-
+        let mut wallet = self
+            .wallet
+            .try_write()
+            .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?;
         let payjoin_proposal = provisional_payjoin.finalize_proposal(
             |psbt: &payjoin::bitcoin::psbt::Psbt| {
                 // convert from payjoin::bitcoin 30.0
                 let mut psbt = PartiallySignedTransaction::from_str(&psbt.to_string()).unwrap();
-                let wallet = self
-                    .wallet
-                    .try_read()
-                    .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?;
+
                 wallet
                     .sign(&mut psbt, SignOptions::default())
                     .map_err(|_| Error::Server(MutinyError::WalletSigningFailed.into()))?;
@@ -356,6 +356,15 @@ impl<S: MutinyStorage> OnChainWallet<S> {
             Some(payjoin::bitcoin::FeeRate::MIN),
         )?;
         let payjoin_proposal_psbt = payjoin_proposal.psbt();
+        let proposal_psbt_29 =
+            bitcoin::psbt::PartiallySignedTransaction::from_str(&payjoin_proposal_psbt.to_string())
+                .map_err(|_| Error::Server(MutinyError::WalletOperationFailed.into()))?;
+        wallet
+            .insert_tx(
+                proposal_psbt_29.extract_tx(),
+                ConfirmationTime::unconfirmed(crate::utils::now().as_secs()),
+            )
+            .map_err(|_| Error::Server(MutinyError::WalletOperationFailed.into()))?;
         log::debug!(
             "Receiver's Payjoin proposal PSBT Rsponse: {:#?}",
             payjoin_proposal_psbt
