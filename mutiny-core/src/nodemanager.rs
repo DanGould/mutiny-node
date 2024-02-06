@@ -35,6 +35,7 @@ use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::util::bip32::ExtendedPrivKey;
 use bitcoin::{Address, Network, OutPoint, Transaction, Txid};
+use gloo_net::websocket::futures::WebSocket;
 use core::time::Duration;
 use esplora_client::{AsyncClient, Builder};
 use futures::{future::join_all, lock::Mutex};
@@ -674,18 +675,38 @@ impl<S: MutinyStorage> NodeManager<S> {
     }
 
     pub async fn start_payjoin_session(&self) -> Result<Enrolled, PayjoinError> {
+        use futures_util::{AsyncReadExt, AsyncWriteExt};
+
         // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
         // That would reveal IP address
+        let tls_connector = {
+            let root_store = futures_rustls::rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+            };
+            
+            let config = futures_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            futures_rustls::TlsConnector::from(Arc::new(config))
+        };
 
+        let domain = futures_rustls::rustls::pki_types::ServerName::try_from("payjo.in")
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid dnsname")
+                })
+                .unwrap()
+                .to_owned();
+
+        let ws = WebSocket::open(&format!("ws://{}", crate::payjoin::OHTTP_RELAYS[0])).unwrap();
+        let ws_io = crate::networking::ws_io::WsIo::new(ws);
+        let mut tls_stream = tls_connector.connect(domain, ws_io).await.unwrap();
+        let ohttp_keys_req = b"GET /ohttp-keys HTTP/1.1\r\nHost: payjo.in\r\nConnection: close\r\n\r\n";
+        tls_stream.write_all(ohttp_keys_req).await.unwrap();
+        tls_stream.flush().await.unwrap();
+        let mut ohttp_keys = Vec::new();
+        tls_stream.read_to_end(&mut ohttp_keys).await.unwrap();
         let http_client = reqwest::Client::builder().build()?;
-
-        let ohttp_keys = http_client
-            .get(format!("{}/ohttp-keys", crate::payjoin::PAYJOIN_DIR))
-            .send()
-            .await?
-            .bytes()
-            .await?;
-        let ohttp_keys_base64 = base64::encode(ohttp_keys.as_ref());
+        let ohttp_keys_base64 = base64::encode(ohttp_keys);
 
         let mut enroller = payjoin::receive::v2::Enroller::from_relay_config(
             crate::payjoin::PAYJOIN_DIR,
