@@ -16,6 +16,13 @@
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
         rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        isDarwin = system == "x86_64-darwin" || system == "aarch64-darwin";
+         # Add firefox deps only on non-darwin.
+         # darwin is listed in badPlatforms in pkgs.firefox's meta.
+        optionalPackages = if isDarwin then [] else [
+          pkgs.firefox
+          pkgs.geckodriver
+        ];
         inputs = [
 	  rust
           pkgs.rust-analyzer
@@ -30,9 +37,7 @@
 	  pkgs.clang
           pkgs.corepack_20
           pkgs.nodejs_20
-          pkgs.firefox
-          pkgs.geckodriver
-	];
+	] ++ optionalPackages;
       in
       {
         defaultPackage = pkgs.rustPlatform.buildRustPackage {
