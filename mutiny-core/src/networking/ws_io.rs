@@ -114,39 +114,58 @@ mod test {
     use gloo_net::websocket::futures::WebSocket;
     use wasm_bindgen_test::{wasm_bindgen_test as test};
 
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen_test::*;
+    use web_sys::console;
+
+    // Bind to JavaScript's console.log
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = console)]
+        fn log(s: &str);
+    }
+
+    // A utility function to use in Rust
+    pub fn console_log(s: &str) {
+        log(s);
+    }
+
     #[test]
     async fn test_ws_io() {
         use futures_util::{AsyncReadExt, AsyncWriteExt};
         assert!(true);
-        // // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
-        // // That would reveal IP address
-        // let tls_connector = {
-        //     let root_store = futures_rustls::rustls::RootCertStore {
-        //         roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
-        //     };
+        // DANGER! TODO get from &self config, do not get config directly from PAYJOIN_DIR ohttp-gateway
+        // That would reveal IP address
+        let tls_connector = {
+            let root_store = futures_rustls::rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect(),
+            };
             
-        //     let config = futures_rustls::rustls::ClientConfig::builder()
-        //         .with_root_certificates(root_store)
-        //         .with_no_client_auth();
-        //     futures_rustls::TlsConnector::from(Arc::new(config))
-        // };
+            let config = futures_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            futures_rustls::TlsConnector::from(Arc::new(config))
+        };
 
-        // let domain = futures_rustls::rustls::pki_types::ServerName::try_from("payjo.in")
-        //         .map_err(|_| {
-        //             std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid dnsname")
-        //         })
-        //         .unwrap()
-        //         .to_owned();
-
-        // let ws = WebSocket::open(&format!("ws://127.0.0.1:3030")).unwrap();
-        // let ws_io = crate::networking::ws_io::WsIo::new(ws);
-        // let mut tls_stream = tls_connector.connect(domain, ws_io).await.unwrap();
-        // let ohttp_keys_req = b"GET /ohttp-keys HTTP/1.1\r\nHost: payjo.in\r\nConnection: close\r\n\r\n";
-        // tls_stream.write_all(ohttp_keys_req).await.unwrap();
-        // tls_stream.flush().await.unwrap();
-        // let mut ohttp_keys = Vec::new();
-        // tls_stream.read_to_end(&mut ohttp_keys).await.unwrap();
-        // let ohttp_keys_base64 = base64::encode(ohttp_keys);
-        // println!("{}", &ohttp_keys_base64);
+        let domain = futures_rustls::rustls::pki_types::ServerName::try_from("payjo.in")
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid dnsname")
+                })
+                .unwrap()
+                .to_owned();
+        console_log("GGGGGG");
+        let ws = WebSocket::open(&format!("wss://ohttp.payjoin.org:443")).unwrap();
+        //let ws_io = crate::networking::ws_io::WsIo::new(ws);
+        console_log("GGGGGG");
+        let mut tls_stream = tls_connector.connect(domain, ws).await.unwrap();
+        let ohttp_keys_req = b"GET /ohttp-keys HTTP/1.1\r\nHost: payjo.in\r\nConnection: close\r\n\r\n";
+        console_log("GGGGGG");
+        tls_stream.write_all(ohttp_keys_req).await.unwrap();
+        tls_stream.flush().await.unwrap();
+        let mut ohttp_keys = Vec::new();
+        tls_stream.read_to_end(&mut ohttp_keys).await.unwrap();
+        let ohttp_keys_base64 = base64::encode(ohttp_keys);
+        console_log(&ohttp_keys_base64);
+        println!("{}", &ohttp_keys_base64);
     }
 }

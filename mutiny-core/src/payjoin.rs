@@ -6,7 +6,8 @@ use payjoin::receive::v2::Enrolled;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub(crate) const OHTTP_RELAYS: [&str; 2] = [
+pub(crate) const OHTTP_RELAYS: [&str; 3] = [
+    "https://ohttp.payjoin.org",
     "https://ohttp-relay.obscuravpn.io/payjoin",
     "https://bobspace-ohttp.duckdns.org",
 ];
